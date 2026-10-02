@@ -18,7 +18,7 @@ import static org.lwjgl.system.MemoryStack.stackPush;
  * then surround GUI drawing with {@link #beginFrame(float, float, float)} and
  * {@link #endFrame()}.</p>
  *
- * <p>LWJGL/NanoVG version target: 3.3.3.</p>
+ * <p>Uses the NanoVG API provided by the LWJGL runtime bundled by Amethyst.</p>
  */
 public final class NanoVGRenderer {
 
@@ -36,23 +36,11 @@ public final class NanoVGRenderer {
     private NanoVGRenderer() {
     }
 
-    /**
-     * Initializes NanoVG.
-     *
-     * <p>This must be called from the Minecraft render thread after an
-     * OpenGL context has been created.</p>
-     *
-     * @return true when initialization succeeded
-     */
     public static boolean initialize() {
         if (initialized) {
             return true;
         }
 
-        /*
-         * NanoVGGL3 requires an active OpenGL context.
-         * Minecraft/LWJGL is responsible for creating the capabilities.
-         */
         try {
             GL.getCapabilities();
         } catch (IllegalStateException exception) {
@@ -79,27 +67,14 @@ public final class NanoVGRenderer {
         return true;
     }
 
-    /**
-     * Returns whether NanoVG has been initialized successfully.
-     */
     public static boolean isInitialized() {
         return initialized && context != 0L;
     }
 
-    /**
-     * Returns whether a NanoVG frame is currently active.
-     */
     public static boolean isFrameActive() {
         return frameActive;
     }
 
-    /**
-     * Starts a NanoVG frame.
-     *
-     * @param width logical/window width
-     * @param height logical/window height
-     * @param devicePixelRatio framebuffer pixel ratio
-     */
     public static void beginFrame(
             float width,
             float height,
@@ -136,9 +111,6 @@ public final class NanoVGRenderer {
         frameActive = true;
     }
 
-    /**
-     * Ends the current NanoVG frame.
-     */
     public static void endFrame() {
         if (!frameActive) {
             return;
@@ -148,9 +120,6 @@ public final class NanoVGRenderer {
         frameActive = false;
     }
 
-    /**
-     * Cancels the current frame without presenting its NanoVG draw commands.
-     */
     public static void cancelFrame() {
         if (!frameActive) {
             return;
@@ -160,12 +129,6 @@ public final class NanoVGRenderer {
         frameActive = false;
     }
 
-    /**
-     * Releases the NanoVG context.
-     *
-     * <p>Call this when the OpenGL context is being destroyed or the client
-     * is shutting down.</p>
-     */
     public static void destroy() {
         if (context == 0L) {
             initialized = false;
@@ -187,31 +150,19 @@ public final class NanoVGRenderer {
         scaleY = 1.0f;
     }
 
-    /**
-     * Gets the raw NanoVG context handle.
-     */
     public static long getContext() {
         ensureInitialized();
         return context;
     }
 
-    /**
-     * Sets the logical X scaling used by helper drawing methods.
-     */
     public static void setScaleX(float scale) {
         scaleX = sanitizeScale(scale);
     }
 
-    /**
-     * Sets the logical Y scaling used by helper drawing methods.
-     */
     public static void setScaleY(float scale) {
         scaleY = sanitizeScale(scale);
     }
 
-    /**
-     * Sets both logical X and Y scaling values.
-     */
     public static void setScale(float scale) {
         float sanitized = sanitizeScale(scale);
 
@@ -231,9 +182,6 @@ public final class NanoVGRenderer {
     // Shapes
     // -------------------------------------------------------------------------
 
-    /**
-     * Draws a solid rectangle.
-     */
     public static void drawRect(
             float x,
             float y,
@@ -260,9 +208,6 @@ public final class NanoVGRenderer {
         NanoVG.nvgFill(context);
     }
 
-    /**
-     * Draws a solid rounded rectangle.
-     */
     public static void drawRoundedRect(
             float x,
             float y,
@@ -291,9 +236,6 @@ public final class NanoVGRenderer {
         NanoVG.nvgFill(context);
     }
 
-    /**
-     * Draws a rounded rectangle where every corner can have its own radius.
-     */
     public static void drawRoundedRectVarying(
             float x,
             float y,
@@ -328,9 +270,6 @@ public final class NanoVGRenderer {
         NanoVG.nvgFill(context);
     }
 
-    /**
-     * Draws a circle.
-     */
     public static void drawCircle(
             float centerX,
             float centerY,
@@ -355,9 +294,6 @@ public final class NanoVGRenderer {
         NanoVG.nvgFill(context);
     }
 
-    /**
-     * Draws an ellipse.
-     */
     public static void drawEllipse(
             float centerX,
             float centerY,
@@ -384,9 +320,6 @@ public final class NanoVGRenderer {
         NanoVG.nvgFill(context);
     }
 
-    /**
-     * Draws a line with a rounded cap.
-     */
     public static void drawLine(
             float x1,
             float y1,
@@ -428,9 +361,6 @@ public final class NanoVGRenderer {
         NanoVG.nvgStroke(context);
     }
 
-    /**
-     * Draws a stroked rounded rectangle.
-     */
     public static void drawRoundedOutline(
             float x,
             float y,
@@ -469,9 +399,6 @@ public final class NanoVGRenderer {
     // Gradients
     // -------------------------------------------------------------------------
 
-    /**
-     * Draws a simple linear gradient rectangle.
-     */
     public static void drawLinearGradient(
             float x,
             float y,
@@ -490,8 +417,8 @@ public final class NanoVGRenderer {
         requireFrame();
 
         try (var stack = stackPush()) {
-            NVGColor inner = NVGColor.mallocStack(stack);
-            NVGColor outer = NVGColor.mallocStack(stack);
+            NVGColor inner = NVGColor.malloc(stack);
+            NVGColor outer = NVGColor.malloc(stack);
 
             NanoVG.nvgRGBAf(
                     clamp01(startR),
@@ -526,10 +453,6 @@ public final class NanoVGRenderer {
             float endX = centerX + dx * extent;
             float endY = centerY + dy * extent;
 
-            /*
-             * NanoVG's linear gradient constructor takes start/end positions
-             * and two colors.
-             */
             NVGPaint paint = NanoVG.nvgLinearGradient(
                     context,
                     startX,
@@ -538,7 +461,7 @@ public final class NanoVGRenderer {
                     endY,
                     inner,
                     outer,
-                    NVGPaint.mallocStack(stack)
+                    NVGPaint.malloc(stack)
             );
 
             NanoVG.nvgBeginPath(context);
@@ -556,9 +479,6 @@ public final class NanoVGRenderer {
         }
     }
 
-    /**
-     * Draws a rounded rectangle with a box-shadow-like gradient.
-     */
     public static void drawShadowedRoundedRect(
             float x,
             float y,
@@ -575,8 +495,8 @@ public final class NanoVGRenderer {
         requireFrame();
 
         try (var stack = stackPush()) {
-            NVGColor transparent = NVGColor.mallocStack(stack);
-            NVGColor shadow = NVGColor.mallocStack(stack);
+            NVGColor transparent = NVGColor.malloc(stack);
+            NVGColor shadow = NVGColor.malloc(stack);
 
             NanoVG.nvgRGBAf(
                     0.0f,
@@ -609,7 +529,7 @@ public final class NanoVGRenderer {
                     sr(shadowSize),
                     shadow,
                     transparent,
-                    NVGPaint.mallocStack(stack)
+                    NVGPaint.malloc(stack)
             );
 
             NanoVG.nvgBeginPath(context);
@@ -644,9 +564,6 @@ public final class NanoVGRenderer {
     // Clipping
     // -------------------------------------------------------------------------
 
-    /**
-     * Sets the active clipping/scissor rectangle.
-     */
     public static void scissor(
             float x,
             float y,
@@ -664,9 +581,6 @@ public final class NanoVGRenderer {
         );
     }
 
-    /**
-     * Resets NanoVG clipping.
-     */
     public static void resetScissor() {
         requireFrame();
         NanoVG.nvgResetScissor(context);
@@ -720,11 +634,6 @@ public final class NanoVGRenderer {
     // Text
     // -------------------------------------------------------------------------
 
-    /**
-     * Draws text using a previously loaded NanoVG font.
-     *
-     * @param fontId font returned by nvgCreateFont / nvgCreateFontMem
-     */
     public static void drawText(
             int fontId,
             String text,
@@ -767,9 +676,6 @@ public final class NanoVGRenderer {
         );
     }
 
-    /**
-     * Sets the current NanoVG font by ID.
-     */
     public static void setFont(int fontId) {
         requireFrame();
 
@@ -783,9 +689,6 @@ public final class NanoVGRenderer {
         );
     }
 
-    /**
-     * Sets the current font size.
-     */
     public static void setFontSize(float size) {
         requireFrame();
 
@@ -806,7 +709,7 @@ public final class NanoVGRenderer {
             float a
     ) {
         try (var stack = stackPush()) {
-            NVGColor color = NVGColor.mallocStack(stack);
+            NVGColor color = NVGColor.malloc(stack);
 
             NanoVG.nvgRGBAf(
                     clamp01(r),
@@ -820,11 +723,6 @@ public final class NanoVGRenderer {
                     context,
                     color
             );
-
-            /*
-             * NanoVG copies the color into its internal state, so the
-             * stack-allocated color does not need to remain alive afterwards.
-             */
         }
     }
 
