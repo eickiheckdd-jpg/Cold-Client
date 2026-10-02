@@ -8,40 +8,46 @@ import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL21;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GL31;
-import org.lwjgl.opengl.GL32;
 import org.lwjgl.opengl.GL33;
+import org.lwjgl.system.MemoryStack;
 
-import java.nio.ByteBuffer;
+import java.nio.IntBuffer;
 
 /**
  * Saves/restores the GL state NanoVG changes so Minecraft's own
- * rendering isn't left in a corrupted state after the ClickGUI draws.
+ * rendering isn't left corrupted after the ClickGUI draws
+ * (inventory, pause menu, tooltips, hotbar, mod menu icons, etc.).
  */
 public final class GlStateGuard {
     private GlStateGuard() {}
 
     private static boolean saved;
 
-    // NanoVG's GL3 backend binds its own uniform buffer at binding point 0 and
-    // textures/samplers on unit 0. Minecraft's GUI pipelines use these too.
     private static final int UBO_SLOTS = 8;
-    private static final int TEX_UNITS = 4;
+    private static final int TEX_UNITS = 8;
+
     private static final int[] uboBuffer = new int[UBO_SLOTS];
     private static final long[] uboStart = new long[UBO_SLOTS];
     private static final long[] uboSize = new long[UBO_SLOTS];
     private static int uniformBuffer;
-    private static final int[] unitTexture = new int[TEX_UNITS];
+
+    private static final int[] unitTexture2d = new int[TEX_UNITS];
     private static final int[] unitSampler = new int[TEX_UNITS];
 
     private static int program, vao, arrayBuffer, elementBuffer, activeTexture;
-    private static int fbo, unpackAlign, unpackRowLength, unpackSkipPixels, unpackSkipRows, unpackBuffer;
+    private static int drawFbo, readFbo;
+    private static int unpackAlign, unpackRowLength, unpackSkipPixels, unpackSkipRows, unpackBuffer;
+    private static int packAlign, packBuffer;
+
     private static int blendSrcRgb, blendDstRgb, blendSrcA, blendDstA, blendEqRgb, blendEqA;
     private static int cullMode, frontFace, depthFunc, stencilMask;
     private static int stencilFunc, stencilRef, stencilValueMask;
     private static int stencilFail, stencilZFail, stencilZPass;
+    private static int polygonMode;
+
     private static boolean blend, cull, depthTest, stencilTest, scissor;
     private static boolean depthMask;
-    private static final boolean[] colorMask = new boolean[4];
+    private static boolean colorMaskR, colorMaskG, colorMaskB, colorMaskA;
     private static final int[] viewport = new int[4];
     private static final int[] scissorBox = new int[4];
 
@@ -51,13 +57,32 @@ public final class GlStateGuard {
         arrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
         elementBuffer = GL11.glGetInteger(GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING);
         activeTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
-        fbo = GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
+
+        drawFbo = GL11.glGetInteger(GL30.GL_DRAW_FRAMEBUFFER_BINDING);
+        readFbo = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING);
 
         unpackBuffer = GL11.glGetInteger(GL21.GL_PIXEL_UNPACK_BUFFER_BINDING);
         unpackAlign = GL11.glGetInteger(GL11.GL_UNPACK_ALIGNMENT);
         unpackRowLength = GL11.glGetInteger(GL11.GL_UNPACK_ROW_LENGTH);
         unpackSkipPixels = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_PIXELS);
         unpackSkipRows = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_ROWS);
+
+        packBuffer = GL11.glGetInteger(GL21.GL_PIXEL_PACK_BUFFER_BINDING);
+        packAlign = GL11.glGetInteger(GL11.GL_PACK_ALIGNMENT);
+
+        uniformBuffer = GL11.glGetInteger(GL31.GL_UNIFORM_BUFFER_BINDING);
+        for (int i = 0; i < UBO_SLOTS; i++) {
+            uboBuffer[i] = GL30.glGetIntegeri(GL31.GL_UNIFORM_BUFFER_BINDING, i);
+            uboStart[i] = GL30.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_START, i);
+            uboSize[i] = GL30.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_SIZE, i);
+        }
+
+        for (int u = 0; u < TEX_UNITS; u++) {
+            GL13.glActiveTexture(GL13.GL_TEXTURE0 + u);
+            unitTexture2d[u] = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+            unitSampler[u] = GL11.glGetInteger(GL33.GL_SAMPLER_BINDING);
+        }
+        GL13.glActiveTexture(activeTexture);
 
         blend = GL11.glIsEnabled(GL11.GL_BLEND);
         cull = GL11.glIsEnabled(GL11.GL_CULL_FACE);
@@ -85,58 +110,73 @@ public final class GlStateGuard {
         stencilZFail = GL11.glGetInteger(GL11.GL_STENCIL_PASS_DEPTH_FAIL);
         stencilZPass = GL11.glGetInteger(GL11.GL_STENCIL_PASS_DEPTH_PASS);
 
-        ByteBuffer buf = ByteBuffer.allocateDirect(4);
-        GL11.glGetBooleanv(GL11.GL_COLOR_WRITEMASK, buf);
-        for (int i = 0; i < 4; i++) colorMask[i] = buf.get(i) != 0;
-
-        GL11.glGetIntegerv(GL11.GL_VIEWPORT, viewport);
-        GL11.glGetIntegerv(GL11.GL_SCISSOR_BOX, scissorBox);
-
-        uniformBuffer = GL11.glGetInteger(GL31.GL_UNIFORM_BUFFER_BINDING);
-        for (int i = 0; i < UBO_SLOTS; i++) {
-            uboBuffer[i] = GL30.glGetIntegeri(GL31.GL_UNIFORM_BUFFER_BINDING, i);
-            uboStart[i] = GL32.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_START, i);
-            uboSize[i] = GL32.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_SIZE, i);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            IntBuffer vp = stack.mallocInt(4);
+            GL11.glGetIntegerv(GL11.GL_VIEWPORT, vp);
+            vp.get(viewport);
+            IntBuffer sc = stack.mallocInt(4);
+            GL11.glGetIntegerv(GL11.GL_SCISSOR_BOX, sc);
+            sc.get(scissorBox);
+            IntBuffer pm = stack.mallocInt(2);
+            GL11.glGetIntegerv(GL11.GL_POLYGON_MODE, pm);
+            polygonMode = pm.get(0);
         }
-        for (int u = 0; u < TEX_UNITS; u++) {
-            GL13.glActiveTexture(GL13.GL_TEXTURE0 + u);
-            unitTexture[u] = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
-            unitSampler[u] = GL11.glGetInteger(GL33.GL_SAMPLER_BINDING);
+
+        colorMaskR = GL11.glGetBoolean(GL11.GL_COLOR_WRITEMASK);
+        // Color writemask is 4 values — query via buffer
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var bb = stack.malloc(4);
+            GL11.glGetBooleanv(GL11.GL_COLOR_WRITEMASK, bb);
+            colorMaskR = bb.get(0) != 0;
+            colorMaskG = bb.get(1) != 0;
+            colorMaskB = bb.get(2) != 0;
+            colorMaskA = bb.get(3) != 0;
         }
-        GL13.glActiveTexture(activeTexture);
 
         saved = true;
     }
 
-    /**
-     * Puts the GL state NanoVG silently relies on into a known-good shape. Call right after
-     * {@link #save()}; {@link #restore()} puts everything back afterwards.
-     *
-     * <p>The important part is the sampler: Minecraft binds sampler objects on texture unit 0
-     * and never unbinds them. A bound sampler object overrides the texture's own filter
-     * parameters, so NanoVG's font atlas (a single level texture) gets sampled with whatever
-     * filter Minecraft used last. If that was a mipmapped filter the atlas is "incomplete",
-     * the sampler returns 0 and every glyph comes out fully transparent, while flat shapes
-     * (which never sample a texture) still render fine.</p>
-     */
+    /** Clean state NanoVG expects before beginFrame. */
     public static void prepareForNanoVG() {
-        // NanoVG binds its textures on whatever unit is active and then samples unit 0.
+        // Leftover Minecraft sampler on unit 0 → purple/missing textures & invisible text
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL33.glBindSampler(0, 0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
 
-        // Font atlas uploads must read from client memory with default pixel-store state.
+        for (int u = 1; u < TEX_UNITS; u++) {
+            GL13.glActiveTexture(GL13.GL_TEXTURE0 + u);
+            GL33.glBindSampler(u, 0);
+        }
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+
         GL15.glBindBuffer(GL21.GL_PIXEL_UNPACK_BUFFER, 0);
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
         GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, 0);
         GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, 0);
         GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, 0);
+
+        GL11.glDisable(GL11.GL_CULL_FACE);
+        GL11.glDisable(GL11.GL_DEPTH_TEST);
+        GL11.glDisable(GL11.GL_STENCIL_TEST);
+        GL11.glEnable(GL11.GL_BLEND);
+        GL14.glBlendFuncSeparate(
+                GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA,
+                GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA
+        );
+        GL11.glColorMask(true, true, true, true);
+        GL11.glDepthMask(false);
+        GL11.glPolygonMode(GL11.GL_FRONT_AND_BACK, GL11.GL_FILL);
     }
 
     public static void restore() {
-        if (!saved) return;
+        if (!saved) {
+            return;
+        }
         saved = false;
 
-        GL30.glBindFramebuffer(GL30.GL_FRAMEBUFFER, fbo);
+        GL30.glBindFramebuffer(GL30.GL_DRAW_FRAMEBUFFER, drawFbo);
+        GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo);
+
         GL11.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         GL11.glScissor(scissorBox[0], scissorBox[1], scissorBox[2], scissorBox[3]);
 
@@ -147,7 +187,7 @@ public final class GlStateGuard {
 
         for (int u = 0; u < TEX_UNITS; u++) {
             GL13.glActiveTexture(GL13.GL_TEXTURE0 + u);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, unitTexture[u]);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, unitTexture2d[u]);
             GL33.glBindSampler(u, unitSampler[u]);
         }
         GL13.glActiveTexture(activeTexture);
@@ -167,6 +207,9 @@ public final class GlStateGuard {
         GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, unpackSkipPixels);
         GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, unpackSkipRows);
 
+        GL15.glBindBuffer(GL21.GL_PIXEL_PACK_BUFFER, packBuffer);
+        GL11.glPixelStorei(GL11.GL_PACK_ALIGNMENT, packAlign);
+
         set(GL11.GL_BLEND, blend);
         set(GL11.GL_CULL_FACE, cull);
         set(GL11.GL_DEPTH_TEST, depthTest);
@@ -185,10 +228,16 @@ public final class GlStateGuard {
         GL11.glStencilFunc(stencilFunc, stencilRef, stencilValueMask);
         GL11.glStencilOp(stencilFail, stencilZFail, stencilZPass);
 
-        GL11.glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
+        GL11.glPolygonMode(GL11.GL_FRONT_AND_BACK, polygonMode);
+
+        GL11.glColorMask(colorMaskR, colorMaskG, colorMaskB, colorMaskA);
     }
 
     private static void set(int cap, boolean on) {
-        if (on) GL11.glEnable(cap); else GL11.glDisable(cap);
+        if (on) {
+            GL11.glEnable(cap);
+        } else {
+            GL11.glDisable(cap);
+        }
     }
 }
