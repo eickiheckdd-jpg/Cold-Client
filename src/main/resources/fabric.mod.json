@@ -13,6 +13,9 @@
       "com.coldclient.ColdClient"
     ]
   },
+  "mixins": [
+    "cold-client.client.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.19.5",
     "minecraft": "~26.2",
