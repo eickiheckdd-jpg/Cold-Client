@@ -1,5 +1,6 @@
 package com.coldclient.gui;
 
+import com.coldclient.render.GlStateGuard;
 import com.coldclient.render.NanoVGRenderer;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
@@ -35,6 +36,17 @@ public final class ClickGuiRenderer {
     }
 
     public static void render(ClickGuiScreen screen) {
+        // Save GL state before NanoVG touches anything (including nvgCreate in initialize()).
+        GlStateGuard.save();
+        try {
+            renderInternal(screen);
+        } finally {
+            NanoVGRenderer.cancelFrame(); // no-op unless a frame was left open by an exception
+            GlStateGuard.restore();
+        }
+    }
+
+    private static void renderInternal(ClickGuiScreen screen) {
         if (!NanoVGRenderer.initialize()) {
             return;
         }
