@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(GuiRenderer.class)
 public abstract class GuiRendererMixin {
-    @Inject(method = "render", at = @At("HEAD"))
+    @Inject(method = "render", at = @At("TAIL"))
     private void coldClient$renderClickGui(CallbackInfo ci) {
         Minecraft client = Minecraft.getInstance();
 
