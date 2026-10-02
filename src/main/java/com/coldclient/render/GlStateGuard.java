@@ -6,9 +6,14 @@ import org.lwjgl.opengl.GL14;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
 import org.lwjgl.opengl.GL30;
+import org.lwjgl.opengl.GL31;
+import org.lwjgl.opengl.GL32;
+import org.lwjgl.opengl.GL33;
+
+import java.nio.ByteBuffer;
 
 /**
- * Saves/restores the GL state NanoVG changes so Minecraft's world
+ * Saves/restores the GL state NanoVG changes so Minecraft's own
  * rendering isn't left in a corrupted state after the ClickGUI draws.
  */
 public final class GlStateGuard {
@@ -16,7 +21,18 @@ public final class GlStateGuard {
 
     private static boolean saved;
 
-    private static int program, vao, arrayBuffer, elementBuffer, activeTexture, texture2d;
+    // NanoVG's GL3 backend binds its own uniform buffer at binding point 0 and
+    // textures/samplers on unit 0. Minecraft's GUI pipelines use these too.
+    private static final int UBO_SLOTS = 8;
+    private static final int TEX_UNITS = 4;
+    private static final int[] uboBuffer = new int[UBO_SLOTS];
+    private static final long[] uboStart = new long[UBO_SLOTS];
+    private static final long[] uboSize = new long[UBO_SLOTS];
+    private static int uniformBuffer;
+    private static final int[] unitTexture = new int[TEX_UNITS];
+    private static final int[] unitSampler = new int[TEX_UNITS];
+
+    private static int program, vao, arrayBuffer, elementBuffer, activeTexture;
     private static int fbo, unpackAlign, unpackRowLength, unpackSkipPixels, unpackSkipRows;
     private static int blendSrcRgb, blendDstRgb, blendSrcA, blendDstA, blendEqRgb, blendEqA;
     private static int cullMode, frontFace, depthFunc, stencilMask;
@@ -34,7 +50,6 @@ public final class GlStateGuard {
         arrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
         elementBuffer = GL11.glGetInteger(GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING);
         activeTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
-        texture2d = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
         fbo = GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
 
         unpackAlign = GL11.glGetInteger(GL11.GL_UNPACK_ALIGNMENT);
@@ -68,12 +83,25 @@ public final class GlStateGuard {
         stencilZFail = GL11.glGetInteger(GL11.GL_STENCIL_PASS_DEPTH_FAIL);
         stencilZPass = GL11.glGetInteger(GL11.GL_STENCIL_PASS_DEPTH_PASS);
 
-        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocateDirect(4);
+        ByteBuffer buf = ByteBuffer.allocateDirect(4);
         GL11.glGetBooleanv(GL11.GL_COLOR_WRITEMASK, buf);
         for (int i = 0; i < 4; i++) colorMask[i] = buf.get(i) != 0;
 
         GL11.glGetIntegerv(GL11.GL_VIEWPORT, viewport);
         GL11.glGetIntegerv(GL11.GL_SCISSOR_BOX, scissorBox);
+
+        uniformBuffer = GL11.glGetInteger(GL31.GL_UNIFORM_BUFFER_BINDING);
+        for (int i = 0; i < UBO_SLOTS; i++) {
+            uboBuffer[i] = GL30.glGetIntegeri(GL31.GL_UNIFORM_BUFFER_BINDING, i);
+            uboStart[i] = GL32.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_START, i);
+            uboSize[i] = GL32.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_SIZE, i);
+        }
+        for (int u = 0; u < TEX_UNITS; u++) {
+            GL13.glActiveTexture(GL13.GL_TEXTURE0 + u);
+            unitTexture[u] = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
+            unitSampler[u] = GL11.glGetInteger(GL33.GL_SAMPLER_BINDING);
+        }
+        GL13.glActiveTexture(activeTexture);
 
         saved = true;
     }
@@ -90,8 +118,22 @@ public final class GlStateGuard {
         GL30.glBindVertexArray(vao);
         GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, arrayBuffer);
         GL15.glBindBuffer(GL15.GL_ELEMENT_ARRAY_BUFFER, elementBuffer);
+
+        for (int u = 0; u < TEX_UNITS; u++) {
+            GL13.glActiveTexture(GL13.GL_TEXTURE0 + u);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, unitTexture[u]);
+            GL33.glBindSampler(u, unitSampler[u]);
+        }
         GL13.glActiveTexture(activeTexture);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture2d);
+
+        for (int i = 0; i < UBO_SLOTS; i++) {
+            if (uboBuffer[i] != 0 && uboSize[i] > 0) {
+                GL30.glBindBufferRange(GL31.GL_UNIFORM_BUFFER, i, uboBuffer[i], uboStart[i], uboSize[i]);
+            } else {
+                GL30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, i, uboBuffer[i]);
+            }
+        }
+        GL15.glBindBuffer(GL31.GL_UNIFORM_BUFFER, uniformBuffer);
 
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, unpackAlign);
         GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, unpackRowLength);
