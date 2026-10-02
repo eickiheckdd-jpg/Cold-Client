@@ -4,6 +4,9 @@ import com.coldclient.ColdClient;
 import com.coldclient.render.GlStateGuard;
 import com.coldclient.render.NanoVGRenderer;
 import com.coldclient.render.Ui;
+import com.coldclient.setting.BooleanSetting;
+import com.coldclient.setting.Setting;
+import com.coldclient.setting.SliderSetting;
 import org.lwjgl.opengl.GL11;
 
 import java.util.ArrayList;
@@ -25,6 +28,8 @@ public final class ClickGuiRenderer {
     private static final float PAD = 12.0f;
     private static final float CARD_H = 54.0f;
     private static final float CARD_GAP = 10.0f;
+    private static final float SETTING_H = 66.0f;
+    private static final float SETTING_GAP = 10.0f;
 
     private static final float PANEL_R = 14.0f;
     private static final float SEARCH_R = 11.0f;
@@ -55,15 +60,31 @@ public final class ClickGuiRenderer {
         public final String description;
         public final String category;
         public boolean enabled;
+        private final List<Setting<?>> settings;
 
         // Renderer-owned animation values.
         float anim;
         float hover;
 
-        public Module(String name, String description, String category) {
+        public Module(String name, String description, String category, Setting<?>... settings) {
             this.name = name;
             this.description = description;
             this.category = category;
+            this.settings = List.of(settings == null ? new Setting<?>[0] : settings);
+        }
+
+        public List<Setting<?>> settings() {
+            return settings;
+        }
+
+        /** Find a setting by its developer-facing name. */
+        public Setting<?> setting(String name) {
+            for (Setting<?> setting : settings) {
+                if (setting.name().equals(name)) {
+                    return setting;
+                }
+            }
+            return null;
         }
     }
 
@@ -137,10 +158,12 @@ public final class ClickGuiRenderer {
         Layout L = layout(screen);
         float sc = L.scale;
 
-        pillIndex = pillIndex < 0.0f
-                ? screen.selectedCategory()
-                : approach(pillIndex, screen.selectedCategory(), dt, 16.0f);
-        scrollAnim = approach(scrollAnim, screen.scroll(), dt, 18.0f);
+        if (!screen.isConfiguring()) {
+            pillIndex = pillIndex < 0.0f
+                    ? screen.selectedCategory()
+                    : approach(pillIndex, screen.selectedCategory(), dt, 16.0f);
+            scrollAnim = approach(scrollAnim, screen.scroll(), dt, 18.0f);
+        }
 
         NanoVGRenderer.beginFrame(screen.width, screen.height, pixelRatio(screen));
         if (!NanoVGRenderer.isFrameActive()) {
@@ -164,61 +187,94 @@ public final class ClickGuiRenderer {
         nvgScale(ctx, pop, pop);
         nvgTranslate(ctx, -screen.width * 0.5f, -screen.height * 0.5f);
 
-        // ---- Search bar -----------------------------------------------------
-        panel(L.searchX, L.searchY, L.searchW, L.searchH, SEARCH_R * sc, sc, hair);
-        if (screen.searchFocused()) {
-            Ui.outline(L.searchX, L.searchY, L.searchW, L.searchH, SEARCH_R * sc, hair, ACCENT, 0.65f);
-        }
-
-        float searchMid = L.searchY + L.searchH * 0.5f;
-        float textX = L.searchX + 38 * sc;
-        float searchFont = 12.5f * sc;
-        String query = screen.search();
-
-        Ui.icon(Ui.ICON_SEARCH, L.searchX + 20 * sc, searchMid, 13 * sc, TEXT_FAINT, 1.0f);
-        if (query.isEmpty()) {
-            Ui.text("Search for any module or feature", textX, searchMid, searchFont, false,
-                    TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+        // ---- Search bar / config header -----------------------------------
+        if (screen.isConfiguring()) {
+            panel(L.searchX, L.searchY, L.searchW, L.searchH, SEARCH_R * sc, sc, hair);
+            Ui.text("CONFIGURATION", L.searchX + 18 * sc, L.searchY + L.searchH * 0.5f,
+                    12.5f * sc, true, TEXT, 1.0f, Ui.ALIGN_LEFT_MIDDLE, 1.0f * sc);
+            Module module = screen.configuredModule();
+            if (module != null) {
+                Ui.text(module.name, L.searchX + L.searchW - 18 * sc, L.searchY + L.searchH * 0.5f,
+                        11.5f * sc, false, TEXT_DIM, 1.0f, Ui.ALIGN_RIGHT_MIDDLE);
+            }
         } else {
-            Ui.text(query, textX, searchMid, searchFont, false, TEXT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
-        }
-        if (screen.searchFocused() && (System.currentTimeMillis() / 500L) % 2L == 0L) {
-            float caretX = textX + (query.isEmpty() ? 0.0f : Ui.textWidth(query, searchFont, false)) + 1.5f * sc;
-            Ui.rect(caretX, searchMid - 7 * sc, 1.2f * sc, 14 * sc, 0, TEXT, 0.9f);
+            panel(L.searchX, L.searchY, L.searchW, L.searchH, SEARCH_R * sc, sc, hair);
+            if (screen.searchFocused()) {
+                Ui.outline(L.searchX, L.searchY, L.searchW, L.searchH, SEARCH_R * sc, hair, ACCENT, 0.65f);
+            }
+
+            float searchMid = L.searchY + L.searchH * 0.5f;
+            float textX = L.searchX + 38 * sc;
+            float searchFont = 12.5f * sc;
+            String query = screen.search();
+
+            Ui.icon(Ui.ICON_SEARCH, L.searchX + 20 * sc, searchMid, 13 * sc, TEXT_FAINT, 1.0f);
+            if (query.isEmpty()) {
+                Ui.text("Search for any module or feature", textX, searchMid, searchFont, false,
+                        TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+            } else {
+                Ui.text(query, textX, searchMid, searchFont, false, TEXT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+            }
+            if (screen.searchFocused() && (System.currentTimeMillis() / 500L) % 2L == 0L) {
+                float caretX = textX + (query.isEmpty() ? 0.0f : Ui.textWidth(query, searchFont, false)) + 1.5f * sc;
+                Ui.rect(caretX, searchMid - 7 * sc, 1.2f * sc, 14 * sc, 0, TEXT, 0.9f);
+            }
         }
 
         // ---- Sidebar --------------------------------------------------------
         panel(L.sideX, L.sideY, L.sideW, L.sideH, PANEL_R * sc, sc, hair);
 
-        Ui.text("MODULES", L.sideX + 20 * sc, L.sideY + 22 * sc, 9.0f * sc, true,
-                TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE, 1.2f * sc);
+        if (screen.isConfiguring()) {
+            Ui.text("CONFIG", L.sideX + 20 * sc, L.sideY + 22 * sc, 9.0f * sc, true,
+                    TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE, 1.2f * sc);
 
-        // Animated selection pill.
-        float pillX = L.sideX + 10 * sc;
-        float pillW = L.sideW - 20 * sc;
-        float pillH = CAT_H * sc;
-        float pillY = L.sideY + CAT_TOP * sc + pillIndex * CAT_PITCH * sc;
-        Ui.shadow(pillX, pillY, pillW, pillH, 9 * sc, 14 * sc, 3 * sc, ACCENT, 0.40f);
-        Ui.gradient(pillX, pillY, pillW, pillH, 9 * sc, ACCENT, 1.0f, ACCENT_DEEP, 1.0f, false);
+            float backY = L.sideY + CAT_TOP * sc;
+            boolean backHover = inside(mx, my, L.sideX + 10 * sc, backY, L.sideW - 20 * sc, CAT_H * sc);
+            Ui.rect(L.sideX + 10 * sc, backY, L.sideW - 20 * sc, CAT_H * sc, 9 * sc,
+                    0xFFFFFF, backHover ? 0.08f : 0.03f);
+            Ui.text("←", L.sideX + 29 * sc, backY + CAT_H * sc * 0.5f, 15 * sc, false,
+                    TEXT_DIM, 1.0f, Ui.ALIGN_CENTER_MIDDLE);
+            Ui.text("Back", L.sideX + 48 * sc, backY + CAT_H * sc * 0.5f, 13 * sc, false,
+                    backHover ? TEXT : TEXT_DIM, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
 
-        String[] categories = screen.categories();
-        for (int i = 0; i < categories.length; i++) {
-            float itemY = L.sideY + (CAT_TOP + i * CAT_PITCH) * sc;
-
-            boolean hovered = inside(mx, my, pillX, itemY, pillW, pillH);
-            categoryHover[i] = approach(categoryHover[i], hovered ? 1.0f : 0.0f, dt, 18.0f);
-
-            // How "selected" this item looks, following the moving pill.
-            float sel = Math.max(0.0f, 1.0f - Math.abs(pillIndex - i));
-
-            if (categoryHover[i] > 0.01f) {
-                Ui.rect(pillX, itemY, pillW, pillH, 9 * sc, 0xFFFFFF, 0.06f * categoryHover[i] * (1.0f - sel));
+            Module module = screen.configuredModule();
+            if (module != null) {
+                Ui.text(Ui.fit(module.name, 11.5f * sc, true, (L.sideW - 40 * sc)),
+                        L.sideX + 20 * sc, L.sideY + 104 * sc, 11.5f * sc, true,
+                        TEXT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+                Ui.text("Settings", L.sideX + 20 * sc, L.sideY + 128 * sc,
+                        10.5f * sc, false, TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
             }
+        } else {
+            Ui.text("MODULES", L.sideX + 20 * sc, L.sideY + 22 * sc, 9.0f * sc, true,
+                    TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE, 1.2f * sc);
 
-            int labelColor = Ui.mix(TEXT_DIM, 0xFFFFFF, Math.max(sel, categoryHover[i] * 0.5f));
-            Ui.icon(i, L.sideX + 29 * sc, itemY + pillH * 0.5f, 15 * sc, labelColor, 1.0f);
-            Ui.text(categories[i], L.sideX + 48 * sc, itemY + pillH * 0.5f, 13.0f * sc, sel > 0.5f,
-                    labelColor, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+            // Animated selection pill.
+            float pillX = L.sideX + 10 * sc;
+            float pillW = L.sideW - 20 * sc;
+            float pillH = CAT_H * sc;
+            float pillY = L.sideY + CAT_TOP * sc + pillIndex * CAT_PITCH * sc;
+            Ui.shadow(pillX, pillY, pillW, pillH, 9 * sc, 14 * sc, 3 * sc, ACCENT, 0.40f);
+            Ui.gradient(pillX, pillY, pillW, pillH, 9 * sc, ACCENT, 1.0f, ACCENT_DEEP, 1.0f, false);
+
+            String[] categories = screen.categories();
+            for (int i = 0; i < categories.length; i++) {
+                float itemY = L.sideY + (CAT_TOP + i * CAT_PITCH) * sc;
+
+                boolean hovered = inside(mx, my, pillX, itemY, pillW, pillH);
+                categoryHover[i] = approach(categoryHover[i], hovered ? 1.0f : 0.0f, dt, 18.0f);
+
+                float sel = Math.max(0.0f, 1.0f - Math.abs(pillIndex - i));
+
+                if (categoryHover[i] > 0.01f) {
+                    Ui.rect(pillX, itemY, pillW, pillH, 9 * sc, 0xFFFFFF, 0.06f * categoryHover[i] * (1.0f - sel));
+                }
+
+                int labelColor = Ui.mix(TEXT_DIM, 0xFFFFFF, Math.max(sel, categoryHover[i] * 0.5f));
+                Ui.icon(i, L.sideX + 29 * sc, itemY + pillH * 0.5f, 15 * sc, labelColor, 1.0f);
+                Ui.text(categories[i], L.sideX + 48 * sc, itemY + pillH * 0.5f, 13.0f * sc, sel > 0.5f,
+                        labelColor, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+            }
         }
 
         Ui.text(ColdClient.NAME + " " + ColdClient.VERSION, L.sideX + 20 * sc, L.sideY + L.sideH - 18 * sc,
@@ -227,76 +283,160 @@ public final class ClickGuiRenderer {
         // ---- Content --------------------------------------------------------
         panel(L.contentX, L.contentY, L.contentW, L.contentH, PANEL_R * sc, sc, hair);
 
-        List<Integer> visible = visibleModules(screen);
+        if (screen.isConfiguring()) {
+            renderSettings(ctx, screen, L, sc, hair, mx, my);
+        } else {
+            List<Integer> visible = visibleModules(screen);
 
-        if (visible.isEmpty()) {
-            Ui.text("No modules found", L.contentX + L.contentW * 0.5f, L.contentY + L.contentH * 0.5f,
-                    13.0f * sc, false, TEXT_FAINT, 1.0f, Ui.ALIGN_CENTER_MIDDLE);
-        }
-
-        nvgScissor(ctx, L.vpX, L.vpY, L.vpW, L.vpH);
-
-        float yOffset = -scrollAnim * sc;
-        boolean mouseInViewport = inside(mx, my, L.vpX, L.vpY, L.vpW, L.vpH);
-
-        for (int n = 0; n < visible.size(); n++) {
-            int row = n / 2;
-            int col = n % 2;
-            Module module = screen.modules()[visible.get(n)];
-
-            float x = L.cardsX + col * (L.colW + L.gap);
-            float y = L.cardsY + row * (L.cardH + L.gap) + yOffset;
-
-            if (y + L.cardH < L.vpY || y > L.vpY + L.vpH) {
-                continue;
+            if (visible.isEmpty()) {
+                Ui.text("No modules found", L.contentX + L.contentW * 0.5f, L.contentY + L.contentH * 0.5f,
+                        13.0f * sc, false, TEXT_FAINT, 1.0f, Ui.ALIGN_CENTER_MIDDLE);
             }
 
-            boolean hovered = mouseInViewport && inside(mx, my, x, y, L.colW, L.cardH);
-            module.hover = approach(module.hover, hovered ? 1.0f : 0.0f, dt, 18.0f);
-            module.anim = approach(module.anim, module.enabled ? 1.0f : 0.0f, dt, 16.0f);
+            nvgScissor(ctx, L.vpX, L.vpY, L.vpW, L.vpH);
 
-            float r = CARD_R * sc;
+            float yOffset = -scrollAnim * sc;
+            boolean mouseInViewport = inside(mx, my, L.vpX, L.vpY, L.vpW, L.vpH);
 
-            Ui.rect(x, y, L.colW, L.cardH, r, 0xFFFFFF, 0.035f + 0.03f * module.hover);
-            if (module.anim > 0.01f) {
-                Ui.gradient(x, y, L.colW, L.cardH, r,
-                        ACCENT, 0.22f * module.anim, ACCENT_DEEP, 0.04f * module.anim, false);
+            for (int n = 0; n < visible.size(); n++) {
+                int row = n / 2;
+                int col = n % 2;
+                Module module = screen.modules()[visible.get(n)];
+
+                float x = L.cardsX + col * (L.colW + L.gap);
+                float y = L.cardsY + row * (L.cardH + L.gap) + yOffset;
+
+                if (y + L.cardH < L.vpY || y > L.vpY + L.vpH) {
+                    continue;
+                }
+
+                boolean hovered = mouseInViewport && inside(mx, my, x, y, L.colW, L.cardH);
+                module.hover = approach(module.hover, hovered ? 1.0f : 0.0f, dt, 18.0f);
+                module.anim = approach(module.anim, module.enabled ? 1.0f : 0.0f, dt, 16.0f);
+
+                float r = CARD_R * sc;
+
+                Ui.rect(x, y, L.colW, L.cardH, r, 0xFFFFFF, 0.035f + 0.03f * module.hover);
+                if (module.anim > 0.01f) {
+                    Ui.gradient(x, y, L.colW, L.cardH, r,
+                            ACCENT, 0.22f * module.anim, ACCENT_DEEP, 0.04f * module.anim, false);
+                }
+                Ui.outline(x, y, L.colW, L.cardH, r, hair,
+                        Ui.mix(0xFFFFFF, ACCENT, module.anim),
+                        0.07f + 0.07f * module.hover + 0.48f * module.anim);
+
+                float toggleW = 30 * sc;
+                float toggleH = 16 * sc;
+                float toggleX = x + L.colW - 14 * sc - toggleW;
+                Ui.toggle(toggleX, y + (L.cardH - toggleH) * 0.5f, toggleW, toggleH, module.anim, ACCENT);
+
+                float textMax = toggleX - (x + 14 * sc) - 10 * sc;
+                float nameSize = 13.5f * sc;
+                float descSize = 10.5f * sc;
+
+                Ui.text(Ui.fit(module.name, nameSize, true, textMax), x + 14 * sc, y + L.cardH * 0.36f,
+                        nameSize, true, Ui.mix(0xE4E6EE, 0xFFFFFF, module.anim), 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+                Ui.text(Ui.fit(module.description, descSize, false, textMax), x + 14 * sc, y + L.cardH * 0.70f,
+                        descSize, false, TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
             }
-            Ui.outline(x, y, L.colW, L.cardH, r, hair,
-                    Ui.mix(0xFFFFFF, ACCENT, module.anim),
-                    0.07f + 0.07f * module.hover + 0.48f * module.anim);
 
-            float toggleW = 30 * sc;
-            float toggleH = 16 * sc;
-            float toggleX = x + L.colW - 14 * sc - toggleW;
-            Ui.toggle(toggleX, y + (L.cardH - toggleH) * 0.5f, toggleW, toggleH, module.anim, ACCENT);
+            nvgResetScissor(ctx);
 
-            float textMax = toggleX - (x + 14 * sc) - 10 * sc;
-            float nameSize = 13.5f * sc;
-            float descSize = 10.5f * sc;
-
-            Ui.text(Ui.fit(module.name, nameSize, true, textMax), x + 14 * sc, y + L.cardH * 0.36f,
-                    nameSize, true, Ui.mix(0xE4E6EE, 0xFFFFFF, module.anim), 1.0f, Ui.ALIGN_LEFT_MIDDLE);
-            Ui.text(Ui.fit(module.description, descSize, false, textMax), x + 14 * sc, y + L.cardH * 0.70f,
-                    descSize, false, TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
-        }
-
-        nvgResetScissor(ctx);
-
-        // Scrollbar.
-        float max = maxScroll(screen);
-        if (max > 0.0f) {
-            float trackX = L.contentX + L.contentW - 6 * sc;
-            float trackY = L.vpY + 6 * sc;
-            float trackH = L.vpH - 12 * sc;
-            float viewUnits = MAIN_H - 2 * PAD;
-            float thumbH = Math.max(24 * sc, trackH * viewUnits / (viewUnits + max));
-            float thumbY = trackY + (trackH - thumbH) * Math.min(1.0f, scrollAnim / max);
-            Ui.rect(trackX, thumbY, 2.5f * sc, thumbH, 1.25f * sc, 0xFFFFFF, 0.18f);
+            // Scrollbar.
+            float max = maxScroll(screen);
+            if (max > 0.0f) {
+                float trackX = L.contentX + L.contentW - 6 * sc;
+                float trackY = L.vpY + 6 * sc;
+                float trackH = L.vpH - 12 * sc;
+                float viewUnits = MAIN_H - 2 * PAD;
+                float thumbH = Math.max(24 * sc, trackH * viewUnits / (viewUnits + max));
+                float thumbY = trackY + (trackH - thumbH) * Math.min(1.0f, scrollAnim / max);
+                Ui.rect(trackX, thumbY, 2.5f * sc, thumbH, 1.25f * sc, 0xFFFFFF, 0.18f);
+            }
         }
 
         nvgRestore(ctx);
         NanoVGRenderer.endFrame();
+    }
+
+    private static void renderSettings(long ctx, ClickGuiScreen screen, Layout L, float sc, float hair, float mx, float my) {
+        Module module = screen.configuredModule();
+        if (module == null) {
+            Ui.text("No module selected", L.contentX + L.contentW * 0.5f, L.contentY + L.contentH * 0.5f,
+                    13.0f * sc, false, TEXT_FAINT, 1.0f, Ui.ALIGN_CENTER_MIDDLE);
+            return;
+        }
+
+        Ui.text("SETTINGS", L.contentX + 20 * sc, L.contentY + 22 * sc,
+                9.0f * sc, true, TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE, 1.2f * sc);
+        Ui.text(Ui.fit(module.description, 11.0f * sc, false, L.contentW - 40 * sc),
+                L.contentX + 20 * sc, L.contentY + 46 * sc,
+                11.0f * sc, false, TEXT_DIM, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+
+        List<Setting<?>> settings = module.settings();
+        if (settings.isEmpty()) {
+            Ui.text("This module has no settings yet.", L.contentX + L.contentW * 0.5f,
+                    L.contentY + L.contentH * 0.5f, 12.0f * sc, false,
+                    TEXT_FAINT, 1.0f, Ui.ALIGN_CENTER_MIDDLE);
+            return;
+        }
+
+        float x = L.contentX + PAD * sc;
+        float y = L.contentY + (64 - screen.settingScroll()) * sc;
+        float w = L.contentW - 2 * PAD * sc;
+
+        nvgScissor(ctx, L.vpX, L.vpY, L.vpW, L.vpH);
+        for (Setting<?> setting : settings) {
+            if (y + SETTING_H * sc < L.vpY || y > L.vpY + L.vpH) {
+                y += (SETTING_H + SETTING_GAP) * sc;
+                continue;
+            }
+
+            boolean hovered = inside(mx, my, x, y, w, SETTING_H * sc);
+            Ui.rect(x, y, w, SETTING_H * sc, CARD_R * sc, 0xFFFFFF, hovered ? 0.055f : 0.035f);
+            Ui.outline(x, y, w, SETTING_H * sc, CARD_R * sc, hair,
+                    hovered ? 0xFFFFFF : 0x8E94A8, hovered ? 0.15f : 0.07f);
+
+            Ui.text(Ui.fit(setting.name(), 13.0f * sc, true, w - 170 * sc),
+                    x + 14 * sc, y + 20 * sc, 13.0f * sc, true, TEXT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+            if (!setting.description().isEmpty()) {
+                Ui.text(Ui.fit(setting.description(), 10.0f * sc, false, w - 170 * sc),
+                        x + 14 * sc, y + 43 * sc, 10.0f * sc, false, TEXT_FAINT, 1.0f, Ui.ALIGN_LEFT_MIDDLE);
+            }
+
+            if (setting instanceof BooleanSetting bool) {
+                float toggleW = 34 * sc;
+                float toggleH = 18 * sc;
+                float toggleX = x + w - 18 * sc - toggleW;
+                Ui.toggle(toggleX, y + (SETTING_H * sc - toggleH) * 0.5f,
+                        toggleW, toggleH, bool.value() ? 1.0f : 0.0f, ACCENT);
+            } else if (setting instanceof SliderSetting slider) {
+                float sliderW = Math.min(210 * sc, w * 0.36f);
+                float sliderX = x + w - 18 * sc - sliderW;
+                float sliderY = y + SETTING_H * sc * 0.5f;
+                float fraction = (float) ((slider.value() - slider.min()) / (slider.max() - slider.min()));
+
+                Ui.rect(sliderX, sliderY - 3 * sc, sliderW, 6 * sc, 3 * sc, 0x3A3F52, 1.0f);
+                if (fraction > 0.001f) {
+                    Ui.gradient(sliderX, sliderY - 3 * sc, sliderW * fraction, 6 * sc,
+                            3 * sc, ACCENT, 1.0f, ACCENT_DEEP, 1.0f, false);
+                }
+                Ui.circle(sliderX + sliderW * fraction, sliderY, 6 * sc, 0xFFFFFF, 0.98f);
+                Ui.text(formatSliderValue(slider), x + w - 18 * sc, y + 16 * sc,
+                        10.0f * sc, true, TEXT_DIM, 1.0f, Ui.ALIGN_RIGHT_MIDDLE);
+            }
+
+            y += (SETTING_H + SETTING_GAP) * sc;
+        }
+        nvgResetScissor(ctx);
+    }
+
+    private static String formatSliderValue(SliderSetting slider) {
+        double step = slider.step();
+        if (Math.abs(step - Math.rint(step)) < 0.000001) {
+            return Long.toString(Math.round(slider.value()));
+        }
+        return String.format(java.util.Locale.ROOT, "%.2f", slider.value());
     }
 
     /** Glassy dark panel with a soft shadow and hairline border. */
@@ -315,7 +455,8 @@ public final class ClickGuiRenderer {
         return inside(mx, my, L.searchX, L.searchY, L.searchW, L.searchH);
     }
 
-    public static int hitCategory(ClickGuiScreen screen, float mx, float my) {
+    public static int
+hitCategory(ClickGuiScreen screen, float mx, float my) {
         Layout L = layout(screen);
         for (int i = 0; i < screen.categories().length; i++) {
             if (inside(mx, my, L.sideX + 10 * L.scale, L.sideY + (CAT_TOP + i * CAT_PITCH) * L.scale,
@@ -327,6 +468,9 @@ public final class ClickGuiRenderer {
     }
 
     public static int hitModule(ClickGuiScreen screen, float mx, float my) {
+        if (screen.isConfiguring()) {
+            return -1;
+        }
         Layout L = layout(screen);
         if (!inside(mx, my, L.vpX, L.vpY, L.vpW, L.vpH)) {
             return -1;
@@ -344,10 +488,89 @@ public final class ClickGuiRenderer {
         return -1;
     }
 
+    public static boolean hitConfigBack(ClickGuiScreen screen, float mx, float my) {
+        if (!screen.isConfiguring()) {
+            return false;
+        }
+        Layout L = layout(screen);
+        float y = L.sideY + CAT_TOP * L.scale;
+        return inside(mx, my, L.sideX + 10 * L.scale, y,
+                L.sideW - 20 * L.scale, CAT_H * L.scale);
+    }
+
+    public static boolean hitSetting(ClickGuiScreen screen, float mx, float my, int settingIndex) {
+        if (!screen.isConfiguring()) {
+            return false;
+        }
+        Module module = screen.configuredModule();
+        if (module == null || settingIndex < 0 || settingIndex >= module.settings().size()) {
+            return false;
+        }
+        Layout L = layout(screen);
+        float x = L.contentX + PAD * L.scale;
+        float y = L.contentY + (64 + settingIndex * (SETTING_H + SETTING_GAP) - screen.settingScroll()) * L.scale;
+        float w = L.contentW - 2 * PAD * L.scale;
+        return inside(mx, my, x, y, w, SETTING_H * L.scale);
+    }
+
     /** Maximum scroll in base units. */
     public static float maxScroll(ClickGuiScreen screen) {
+        if (screen.isConfiguring()) {
+            return 0.0f;
+        }
         int rows = (visibleModules(screen).size() + 1) / 2;
         float contentHeight = rows * (CARD_H + CARD_GAP) - CARD_GAP;
+        return Math.max(0.0f, contentHeight - (MAIN_H - 2 * PAD));
+    }
+
+    /**
+     * Applies a setting click using the exact same geometry used by renderSettings().
+     * Returns true when the click belonged to a setting control.
+     */
+    public static boolean applySettingClick(ClickGuiScreen screen, float mx, float my) {
+        Module module = screen.configuredModule();
+        if (module == null) {
+            return false;
+        }
+
+        Layout L = layout(screen);
+        float x = L.contentX + PAD * L.scale;
+        float w = L.contentW - 2 * PAD * L.scale;
+        float y = L.contentY + (64 - screen.settingScroll()) * L.scale;
+
+        for (Setting<?> setting : module.settings()) {
+            float h = SETTING_H * L.scale;
+            if (inside(mx, my, x, y, w, h)) {
+                if (setting instanceof BooleanSetting bool) {
+                    bool.toggle();
+                    return true;
+                }
+
+                if (setting instanceof SliderSetting slider) {
+                    float sliderW = Math.min(210 * L.scale, w * 0.36f);
+                    float sliderX = x + w - 18 * L.scale - sliderW;
+                    if (mx >= sliderX - 8 * L.scale && mx <= sliderX + sliderW + 8 * L.scale) {
+                        double fraction = (mx - sliderX) / sliderW;
+                        slider.setFromFraction(fraction);
+                        return true;
+                    }
+                    return true;
+                }
+                return true;
+            }
+            y += (SETTING_H + SETTING_GAP) * L.scale;
+        }
+        return false;
+    }
+
+    /** Maximum settings scroll in base units. */
+    public static float maxSettingScroll(ClickGuiScreen screen) {
+        Module module = screen.configuredModule();
+        if (module == null || module.settings().isEmpty()) {
+            return 0.0f;
+        }
+        float contentHeight = 64 + module.settings().size() * SETTING_H
+                + Math.max(0, module.settings().size() - 1) * SETTING_GAP;
         return Math.max(0.0f, contentHeight - (MAIN_H - 2 * PAD));
     }
 
