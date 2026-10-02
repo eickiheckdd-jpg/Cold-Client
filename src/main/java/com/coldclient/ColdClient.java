@@ -1,5 +1,6 @@
 package com.coldclient;
 
+import com.coldclient.feature.TriggerbotFeature;
 import com.coldclient.gui.ClickGuiScreen;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
@@ -26,6 +27,8 @@ public class ColdClient implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         System.out.println(NAME + " " + VERSION + " initialized.");
+
+        TriggerbotFeature.register();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (OPEN_CLICK_GUI.consumeClick()) {
