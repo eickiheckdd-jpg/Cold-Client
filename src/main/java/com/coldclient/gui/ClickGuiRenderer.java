@@ -89,10 +89,38 @@ public final class ClickGuiRenderer {
 
         GlStateGuard.save();
         try {
+            GlStateGuard.prepareForNanoVG();
+            drainGlErrors();
             renderInternal(screen);
+            reportGlError();
         } finally {
             NanoVGRenderer.cancelFrame(); // no-op unless a frame was left open by an exception
             GlStateGuard.restore();
+        }
+    }
+
+    // Diagnostics: report the first few GL errors raised while the ClickGUI draws.
+    private static final int MAX_GL_ERROR_LOGS = 5;
+    private static int glErrorLogs;
+
+    private static void drainGlErrors() {
+        if (glErrorLogs >= MAX_GL_ERROR_LOGS) {
+            return;
+        }
+        for (int i = 0; i < 16 && GL11.glGetError() != GL11.GL_NO_ERROR; i++) {
+            // Discard errors that were already pending from Minecraft's own rendering.
+        }
+    }
+
+    private static void reportGlError() {
+        if (glErrorLogs >= MAX_GL_ERROR_LOGS) {
+            return;
+        }
+        int error = GL11.glGetError();
+        if (error != GL11.GL_NO_ERROR) {
+            glErrorLogs++;
+            System.err.println("[Cold Client] OpenGL error 0x" + Integer.toHexString(error)
+                    + " while drawing the ClickGUI");
         }
     }
 
