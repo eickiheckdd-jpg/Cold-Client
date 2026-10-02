@@ -27,8 +27,6 @@ public final class GlStateGuard {
     private static final int TEX_UNITS = 8;
 
     private static final int[] uboBuffer = new int[UBO_SLOTS];
-    private static final long[] uboStart = new long[UBO_SLOTS];
-    private static final long[] uboSize = new long[UBO_SLOTS];
     private static int uniformBuffer;
 
     private static final int[] unitTexture2d = new int[TEX_UNITS];
@@ -72,9 +70,8 @@ public final class GlStateGuard {
 
         uniformBuffer = GL11.glGetInteger(GL31.GL_UNIFORM_BUFFER_BINDING);
         for (int i = 0; i < UBO_SLOTS; i++) {
+            // Indexed binding query — no 64-bit range APIs (not in this LWJGL binding)
             uboBuffer[i] = GL30.glGetIntegeri(GL31.GL_UNIFORM_BUFFER_BINDING, i);
-            uboStart[i] = GL30.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_START, i);
-            uboSize[i] = GL30.glGetInteger64i(GL31.GL_UNIFORM_BUFFER_SIZE, i);
         }
 
         for (int u = 0; u < TEX_UNITS; u++) {
@@ -122,8 +119,6 @@ public final class GlStateGuard {
             polygonMode = pm.get(0);
         }
 
-        colorMaskR = GL11.glGetBoolean(GL11.GL_COLOR_WRITEMASK);
-        // Color writemask is 4 values — query via buffer
         try (MemoryStack stack = MemoryStack.stackPush()) {
             var bb = stack.malloc(4);
             GL11.glGetBooleanv(GL11.GL_COLOR_WRITEMASK, bb);
@@ -193,11 +188,7 @@ public final class GlStateGuard {
         GL13.glActiveTexture(activeTexture);
 
         for (int i = 0; i < UBO_SLOTS; i++) {
-            if (uboBuffer[i] != 0 && uboSize[i] > 0) {
-                GL30.glBindBufferRange(GL31.GL_UNIFORM_BUFFER, i, uboBuffer[i], uboStart[i], uboSize[i]);
-            } else {
-                GL30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, i, uboBuffer[i]);
-            }
+            GL30.glBindBufferBase(GL31.GL_UNIFORM_BUFFER, i, uboBuffer[i]);
         }
         GL15.glBindBuffer(GL31.GL_UNIFORM_BUFFER, uniformBuffer);
 
