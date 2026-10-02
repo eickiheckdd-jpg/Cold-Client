@@ -1,5 +1,7 @@
 package com.coldclient.render;
 
+import com.coldclient.ColdClient;
+import net.fabricmc.loader.api.FabricLoader;
 import org.lwjgl.nanovg.NVGColor;
 import org.lwjgl.nanovg.NVGPaint;
 import org.lwjgl.system.MemoryStack;
@@ -9,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import java.nio.file.Files;
 
 import static org.lwjgl.nanovg.NanoVG.*;
 import static org.lwjgl.system.MemoryStack.stackPush;
@@ -66,11 +69,17 @@ public final class Ui {
         if (boldData != null) {
             fontBold = nvgCreateFontMem(c, "cold-bold", boldData, false);
         }
+        System.out.println("[Cold Client] Font load: regular="
+                + (regularData == null ? "resource not found" : "id " + fontRegular)
+                + ", bold="
+                + (boldData == null ? "resource not found" : "id " + fontBold));
+
         if (fontBold < 0) fontBold = fontRegular;
         if (fontRegular < 0) fontRegular = fontBold;
 
         if (fontRegular < 0) {
-            System.err.println("[Cold Client] Could not load UI fonts from " + FONT_REGULAR);
+            System.err.println("[Cold Client] Could not load UI fonts from " + FONT_REGULAR
+                    + " - all ClickGUI text will be skipped.");
         }
     }
 
@@ -79,18 +88,39 @@ public final class Ui {
     }
 
     private static ByteBuffer loadResource(String path) {
-        try (InputStream in = Ui.class.getResourceAsStream(path)) {
-            if (in == null) {
-                return null;
-            }
-            byte[] bytes = in.readAllBytes();
-            ByteBuffer buffer = MemoryUtil.memAlloc(bytes.length);
-            buffer.put(bytes);
-            buffer.flip();
-            return buffer;
-        } catch (IOException exception) {
+        byte[] bytes = readResourceBytes(path);
+        if (bytes == null || bytes.length == 0) {
+            System.err.println("[Cold Client] Font resource not found: " + path);
             return null;
         }
+        ByteBuffer buffer = MemoryUtil.memAlloc(bytes.length);
+        buffer.put(bytes);
+        buffer.flip();
+        return buffer;
+    }
+
+    /** Tries the class loader first, then falls back to Fabric's own view of the mod jar. */
+    private static byte[] readResourceBytes(String path) {
+        try (InputStream in = Ui.class.getResourceAsStream(path)) {
+            if (in != null) {
+                return in.readAllBytes();
+            }
+        } catch (IOException ignored) {
+            // fall through to the Fabric lookup
+        }
+
+        try {
+            String relative = path.startsWith("/") ? path.substring(1) : path;
+            var found = FabricLoader.getInstance()
+                    .getModContainer(ColdClient.MOD_ID)
+                    .flatMap(container -> container.findPath(relative));
+            if (found.isPresent()) {
+                return Files.readAllBytes(found.get());
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // nothing else to try
+        }
+        return null;
     }
 
     // -------------------------------------------------------------------------
