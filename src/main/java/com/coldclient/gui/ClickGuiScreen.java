@@ -1,6 +1,5 @@
 package com.coldclient.gui;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.CharacterEvent;
@@ -13,40 +12,50 @@ import java.util.Locale;
 
 public final class ClickGuiScreen extends Screen {
     private static final String[] CATEGORIES = {
-            "Visuals", "Misc", "Player", "Client", "Movement", "Configs", "Hud"
+            "Combat", "Movement", "Visuals", "Player", "Client"
     };
 
     private static final ClickGuiRenderer.Module[] MODULES = {
+            // Combat
+            new ClickGuiRenderer.Module("Combo Counter", "Tracks your current hit streak", "Combat"),
+            new ClickGuiRenderer.Module("Reach Display", "Shows distance to your target", "Combat"),
+            new ClickGuiRenderer.Module("Hit Indicator", "Flashes when you land a hit", "Combat"),
+            new ClickGuiRenderer.Module("Target HUD", "Health and armor of your target", "Combat"),
+            new ClickGuiRenderer.Module("Armor Status", "Durability of your worn armor", "Combat"),
+            new ClickGuiRenderer.Module("Cooldown Indicator", "Attack cooldown near the crosshair", "Combat"),
+
+            // Movement
+            new ClickGuiRenderer.Module("Sprint", "Keeps sprinting when possible", "Movement"),
+            new ClickGuiRenderer.Module("Sneak Toggle", "Toggle crouch instead of holding", "Movement"),
+            new ClickGuiRenderer.Module("Speed Display", "Shows your current movement speed", "Movement"),
+            new ClickGuiRenderer.Module("Jump Assist", "Movement timing controls", "Movement"),
+            new ClickGuiRenderer.Module("Velocity Display", "Client velocity readout", "Movement"),
+
+            // Visuals
             new ClickGuiRenderer.Module("Fullbright", "Brightens dark areas", "Visuals"),
-            new ClickGuiRenderer.Module("ESP", "Highlights selected entities", "Visuals"),
-            new ClickGuiRenderer.Module("No Hurt Cam", "Removes the camera shake", "Visuals"),
+            new ClickGuiRenderer.Module("Entity Outline", "Highlights selected entities", "Visuals"),
             new ClickGuiRenderer.Module("Nametags", "Improves player name visibility", "Visuals"),
+            new ClickGuiRenderer.Module("No Hurt Cam", "Removes the camera shake", "Visuals"),
             new ClickGuiRenderer.Module("Particles", "Controls particle rendering", "Visuals"),
             new ClickGuiRenderer.Module("Crosshair", "Customizes the in-game crosshair", "Visuals"),
+            new ClickGuiRenderer.Module("Zoom", "Smooth scope-style zoom", "Visuals"),
 
-            new ClickGuiRenderer.Module("Inventory Move", "Move while a screen is open", "Misc"),
-            new ClickGuiRenderer.Module("Fast Place", "Reduces client-side placement delay", "Misc"),
-            new ClickGuiRenderer.Module("Chat Tweaks", "Small chat quality-of-life options", "Misc"),
-            new ClickGuiRenderer.Module("Auto GG", "Sends a configurable message", "Misc"),
-
-            new ClickGuiRenderer.Module("Sprint", "Keeps sprinting when possible", "Player"),
+            // Player
             new ClickGuiRenderer.Module("Camera", "Client camera controls", "Player"),
-            new ClickGuiRenderer.Module("Reach Display", "Shows current interaction distance", "Player"),
+            new ClickGuiRenderer.Module("Inventory Move", "Move while a screen is open", "Player"),
+            new ClickGuiRenderer.Module("Fast Place", "Reduces client-side placement delay", "Player"),
+            new ClickGuiRenderer.Module("Chat Tweaks", "Small chat quality-of-life options", "Player"),
+            new ClickGuiRenderer.Module("Auto GG", "Sends a configurable message", "Player"),
+            new ClickGuiRenderer.Module("Coordinates", "Display player coordinates", "Player"),
 
+            // Client
             new ClickGuiRenderer.Module("ClickGUI", "Open and configure Cold Client", "Client"),
             new ClickGuiRenderer.Module("Notifications", "Client notification settings", "Client"),
             new ClickGuiRenderer.Module("Performance", "Client rendering options", "Client"),
-
-            new ClickGuiRenderer.Module("Sprint Assist", "Movement assistance options", "Movement"),
-            new ClickGuiRenderer.Module("Jump Assist", "Movement timing controls", "Movement"),
-            new ClickGuiRenderer.Module("Velocity", "Client velocity display", "Movement"),
-
-            new ClickGuiRenderer.Module("Profiles", "Manage client profiles", "Configs"),
-            new ClickGuiRenderer.Module("Theme", "Choose GUI appearance", "Configs"),
-
-            new ClickGuiRenderer.Module("ArrayList", "Display active modules", "Hud"),
-            new ClickGuiRenderer.Module("Watermark", "Cold Client watermark", "Hud"),
-            new ClickGuiRenderer.Module("Coordinates", "Display player coordinates", "Hud")
+            new ClickGuiRenderer.Module("Theme", "Choose GUI appearance", "Client"),
+            new ClickGuiRenderer.Module("Profiles", "Manage client profiles", "Client"),
+            new ClickGuiRenderer.Module("Watermark", "Cold Client watermark", "Client"),
+            new ClickGuiRenderer.Module("ArrayList", "Display active modules", "Client")
     };
 
     private int selectedCategory = 0;
@@ -55,9 +64,11 @@ public final class ClickGuiScreen extends Screen {
     private float scroll;
     private int mouseX;
     private int mouseY;
+    private int frameId;
 
     public ClickGuiScreen() {
         super(Component.literal("Cold Client"));
+        ClickGuiRenderer.open();
     }
 
     public int selectedCategory() {
@@ -88,6 +99,11 @@ public final class ClickGuiScreen extends Screen {
         return mouseY;
     }
 
+    /** Increments once per extracted frame; lets the renderer skip duplicate render calls. */
+    public int frameId() {
+        return frameId;
+    }
+
     public String[] categories() {
         return CATEGORIES;
     }
@@ -98,11 +114,11 @@ public final class ClickGuiScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-        // Deliberately do not call super: NanoVG supplies the transparent background/panels.
+        // Deliberately do not call super: everything (panels AND text) is drawn by NanoVG
+        // from GuiRendererMixin, so nothing needs to be queued here.
         this.mouseX = mouseX;
         this.mouseY = mouseY;
-
-        ClickGuiRenderer.extractText(this, graphics);
+        this.frameId++;
     }
 
     @Override
@@ -110,13 +126,9 @@ public final class ClickGuiScreen extends Screen {
         mouseX = (int) event.x();
         mouseY = (int) event.y();
 
-        if (ClickGuiRenderer.hitSearch(this, mouseX, mouseY)) {
-            searchFocused = true;
+        searchFocused = ClickGuiRenderer.hitSearch(this, mouseX, mouseY);
+        if (searchFocused) {
             return true;
-        }
-
-        if (!ClickGuiRenderer.hitSearch(this, mouseX, mouseY)) {
-            searchFocused = false;
         }
 
         int category = ClickGuiRenderer.hitCategory(this, mouseX, mouseY);
@@ -139,8 +151,8 @@ public final class ClickGuiScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double scrollX, double scrollY) {
-        scroll -= (float) scrollY * 32.0f;
-        scroll = Math.max(0.0f, Math.min(scroll, ClickGuiRenderer.maxScroll(this)));
+        scroll -= (float) scrollY * 36.0f;
+        clampScroll();
         return true;
     }
 
@@ -157,17 +169,15 @@ public final class ClickGuiScreen extends Screen {
             if (key == GLFW.GLFW_KEY_BACKSPACE) {
                 if (!search.isEmpty()) {
                     search = search.substring(0, search.length() - 1);
+                    clampScroll();
                 }
                 return true;
             }
 
-            if (key == GLFW.GLFW_KEY_A && (event.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0) {
+            if ((key == GLFW.GLFW_KEY_A && (event.modifiers() & GLFW.GLFW_MOD_CONTROL) != 0)
+                    || key == GLFW.GLFW_KEY_DELETE) {
                 search = "";
-                return true;
-            }
-
-            if (key == GLFW.GLFW_KEY_DELETE) {
-                search = "";
+                clampScroll();
                 return true;
             }
         }
@@ -189,6 +199,7 @@ public final class ClickGuiScreen extends Screen {
         String value = new String(Character.toChars(codepoint));
         if (value.length() == 1 && search.length() < 48) {
             search += value;
+            scroll = 0;
         }
         return true;
     }
@@ -206,17 +217,18 @@ public final class ClickGuiScreen extends Screen {
         }
     }
 
+    /** With an empty search the selected category is shown; otherwise every module is searched. */
     public boolean matches(ClickGuiRenderer.Module module) {
-        if (!module.category.equals(selectedCategoryName())) {
-            return false;
-        }
-
         if (search.isBlank()) {
-            return true;
+            return module.category.equals(selectedCategoryName());
         }
 
-        String q = search.toLowerCase(Locale.ROOT);
+        String q = search.toLowerCase(Locale.ROOT).trim();
         return module.name.toLowerCase(Locale.ROOT).contains(q)
                 || module.description.toLowerCase(Locale.ROOT).contains(q);
+    }
+
+    private void clampScroll() {
+        scroll = Math.max(0.0f, Math.min(scroll, ClickGuiRenderer.maxScroll(this)));
     }
 }
