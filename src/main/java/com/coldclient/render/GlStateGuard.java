@@ -5,6 +5,7 @@ import org.lwjgl.opengl.GL13;
 import org.lwjgl.opengl.GL14;
 import org.lwjgl.opengl.GL15;
 import org.lwjgl.opengl.GL20;
+import org.lwjgl.opengl.GL21;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.GL31;
 import org.lwjgl.opengl.GL32;
@@ -33,7 +34,7 @@ public final class GlStateGuard {
     private static final int[] unitSampler = new int[TEX_UNITS];
 
     private static int program, vao, arrayBuffer, elementBuffer, activeTexture;
-    private static int fbo, unpackAlign, unpackRowLength, unpackSkipPixels, unpackSkipRows;
+    private static int fbo, unpackAlign, unpackRowLength, unpackSkipPixels, unpackSkipRows, unpackBuffer;
     private static int blendSrcRgb, blendDstRgb, blendSrcA, blendDstA, blendEqRgb, blendEqA;
     private static int cullMode, frontFace, depthFunc, stencilMask;
     private static int stencilFunc, stencilRef, stencilValueMask;
@@ -52,6 +53,7 @@ public final class GlStateGuard {
         activeTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
         fbo = GL11.glGetInteger(GL30.GL_FRAMEBUFFER_BINDING);
 
+        unpackBuffer = GL11.glGetInteger(GL21.GL_PIXEL_UNPACK_BUFFER_BINDING);
         unpackAlign = GL11.glGetInteger(GL11.GL_UNPACK_ALIGNMENT);
         unpackRowLength = GL11.glGetInteger(GL11.GL_UNPACK_ROW_LENGTH);
         unpackSkipPixels = GL11.glGetInteger(GL11.GL_UNPACK_SKIP_PIXELS);
@@ -106,6 +108,30 @@ public final class GlStateGuard {
         saved = true;
     }
 
+    /**
+     * Puts the GL state NanoVG silently relies on into a known-good shape. Call right after
+     * {@link #save()}; {@link #restore()} puts everything back afterwards.
+     *
+     * <p>The important part is the sampler: Minecraft binds sampler objects on texture unit 0
+     * and never unbinds them. A bound sampler object overrides the texture's own filter
+     * parameters, so NanoVG's font atlas (a single level texture) gets sampled with whatever
+     * filter Minecraft used last. If that was a mipmapped filter the atlas is "incomplete",
+     * the sampler returns 0 and every glyph comes out fully transparent, while flat shapes
+     * (which never sample a texture) still render fine.</p>
+     */
+    public static void prepareForNanoVG() {
+        // NanoVG binds its textures on whatever unit is active and then samples unit 0.
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL33.glBindSampler(0, 0);
+
+        // Font atlas uploads must read from client memory with default pixel-store state.
+        GL15.glBindBuffer(GL21.GL_PIXEL_UNPACK_BUFFER, 0);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, 0);
+        GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, 0);
+        GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_ROWS, 0);
+    }
+
     public static void restore() {
         if (!saved) return;
         saved = false;
@@ -135,6 +161,7 @@ public final class GlStateGuard {
         }
         GL15.glBindBuffer(GL31.GL_UNIFORM_BUFFER, uniformBuffer);
 
+        GL15.glBindBuffer(GL21.GL_PIXEL_UNPACK_BUFFER, unpackBuffer);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, unpackAlign);
         GL11.glPixelStorei(GL11.GL_UNPACK_ROW_LENGTH, unpackRowLength);
         GL11.glPixelStorei(GL11.GL_UNPACK_SKIP_PIXELS, unpackSkipPixels);
