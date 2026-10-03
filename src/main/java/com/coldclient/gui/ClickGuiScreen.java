@@ -1,5 +1,6 @@
 package com.coldclient.gui;
 
+import com.coldclient.module.FriendManager;
 import com.coldclient.module.ModuleRegistry;
 import com.coldclient.setting.KeybindSetting;
 import com.coldclient.setting.Setting;
@@ -20,6 +21,8 @@ public final class ClickGuiScreen extends Screen {
     private int selectedCategory = 0;
     private String search = "";
     private boolean searchFocused;
+    private String friendInput = "";
+    private boolean friendFocused;
     private float scroll;
     private float settingScroll;
     private int configuredModuleIndex = -1;
@@ -42,6 +45,24 @@ public final class ClickGuiScreen extends Screen {
 
     public String search() {
         return search;
+    }
+
+    public boolean isFriendsTab() {
+        return ModuleRegistry.FRIENDS.equals(selectedCategoryName());
+    }
+
+    public String friendInput() {
+        return friendInput;
+    }
+
+    public boolean friendFocused() {
+        return friendFocused;
+    }
+
+    private void addFriend() {
+        if (FriendManager.add(friendInput)) {
+            friendInput = "";
+        }
     }
 
     public boolean searchFocused() {
@@ -120,10 +141,29 @@ public final class ClickGuiScreen extends Screen {
 
         if (ClickGuiRenderer.hitSearch(this, mouseX, mouseY)) {
             searchFocused = true;
+            friendFocused = false;
             return true;
         }
 
         searchFocused = false;
+
+        if (isFriendsTab() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            if (ClickGuiRenderer.hitFriendsInput(this, mouseX, mouseY)) {
+                friendFocused = true;
+                return true;
+            }
+            if (ClickGuiRenderer.hitFriendsAdd(this, mouseX, mouseY)) {
+                addFriend();
+                return true;
+            }
+            int remove = ClickGuiRenderer.hitFriendRemove(this, mouseX, mouseY);
+            if (remove >= 0) {
+                FriendManager.removeAt(remove);
+                scroll = Math.min(scroll, ClickGuiRenderer.maxFriendScroll());
+                return true;
+            }
+        }
+        friendFocused = false;
 
         int category = ClickGuiRenderer.hitCategory(this, mouseX, mouseY);
         if (category >= 0) {
@@ -205,6 +245,18 @@ public final class ClickGuiScreen extends Screen {
             return true;
         }
 
+        // Typing a friend's name.
+        if (friendFocused && !isConfiguring()) {
+            if (key == GLFW.GLFW_KEY_ESCAPE) {
+                friendFocused = false;
+            } else if (key == GLFW.GLFW_KEY_ENTER || key == GLFW.GLFW_KEY_KP_ENTER) {
+                addFriend();
+            } else if (key == GLFW.GLFW_KEY_BACKSPACE && !friendInput.isEmpty()) {
+                friendInput = friendInput.substring(0, friendInput.length() - 1);
+            }
+            return true; // Right Shift etc. must not close the GUI while typing
+        }
+
         if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) {
             onClose();
             return true;
@@ -255,6 +307,14 @@ public final class ClickGuiScreen extends Screen {
 
     @Override
     public boolean charTyped(CharacterEvent event) {
+        if (friendFocused && isFriendsTab() && !isConfiguring()) {
+            int cp = event.codepoint();
+            boolean ok = cp < 128 && (Character.isLetterOrDigit(cp) || cp == '_');
+            if (ok && friendInput.length() < 16) {
+                friendInput += (char) cp;
+            }
+            return true;
+        }
         if (!searchFocused) {
             return true;
         }
