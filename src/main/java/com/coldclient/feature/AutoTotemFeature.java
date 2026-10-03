@@ -7,7 +7,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.Items;
 
 /**
@@ -71,8 +71,9 @@ public final class AutoTotemFeature {
                 int slot = findTotem(player);
                 if (slot >= 0) {
                     int menuSlot = slot < 9 ? 36 + slot : slot;
-                    client.gameMode.handleInventoryMouseClick(
-                            player.inventoryMenu.containerId, menuSlot, 40, ClickType.SWAP, player);
+                    // 26.x renamed handleInventoryMouseClick/ClickType to handleContainerInput/ContainerInput.
+                    client.gameMode.handleContainerInput(
+                            player.inventoryMenu.containerId, menuSlot, 40, ContainerInput.SWAP, player);
                 }
                 cooldownUntil = now + ns(1000L);
                 if (Cfg.bool(module, "Close Inventory")) {
