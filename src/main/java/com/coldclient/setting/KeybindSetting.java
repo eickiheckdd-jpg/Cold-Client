@@ -13,7 +13,11 @@ public final class KeybindSetting extends Setting<Integer> {
     private boolean wasDown;   // edge detection for the toggle handler
 
     public KeybindSetting(String name, String description) {
-        super(name, description, NONE);
+        this(name, description, NONE);
+    }
+
+    public KeybindSetting(String name, String description, int defaultKey) {
+        super(name, description, defaultKey);
     }
 
     public int key() {
