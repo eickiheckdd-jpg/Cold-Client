@@ -1,6 +1,8 @@
 package com.coldclient.gui;
 
 import com.coldclient.module.ModuleRegistry;
+import com.coldclient.setting.KeybindSetting;
+import com.coldclient.setting.Setting;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
@@ -108,9 +110,9 @@ public final class ClickGuiScreen extends Screen {
             }
 
             if (button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
-                if (ClickGuiRenderer.applySettingClick(this, mouseX, mouseY)) {
-                    return true;
-                }
+                ClickGuiRenderer.pressSetting(this, (float) event.x(), (float) event.y());
+                // An opened/closed dropdown changes the content height.
+                settingScroll = Math.max(0.0f, Math.min(settingScroll, ClickGuiRenderer.maxSettingScroll(this)));
             }
 
             return true;
@@ -155,8 +157,25 @@ public final class ClickGuiScreen extends Screen {
     }
 
     private void closeConfig() {
+        ClickGuiRenderer.resetConfigInteraction(configuredModule());
         configuredModuleIndex = -1;
         settingScroll = 0.0f;
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        mouseX = (int) event.x();
+        mouseY = (int) event.y();
+        if (isConfiguring() && event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+            ClickGuiRenderer.dragSetting(this, (float) event.x(), (float) event.y());
+        }
+        return true;
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        ClickGuiRenderer.endDrag();
+        return true;
     }
 
     @Override
@@ -174,6 +193,17 @@ public final class ClickGuiScreen extends Screen {
     @Override
     public boolean keyPressed(KeyEvent event) {
         int key = event.key();
+
+        // Keybind listener mode takes priority over every other key (including Esc).
+        KeybindSetting listening = listeningKeybind();
+        if (listening != null) {
+            if (key == GLFW.GLFW_KEY_ESCAPE || key == GLFW.GLFW_KEY_DELETE) {
+                listening.unbind();
+            } else if (key != GLFW.GLFW_KEY_RIGHT_SHIFT) { // reserved: opens/closes this GUI
+                listening.bind(key);
+            }
+            return true;
+        }
 
         if (key == GLFW.GLFW_KEY_RIGHT_SHIFT) {
             onClose();
@@ -211,6 +241,18 @@ public final class ClickGuiScreen extends Screen {
         return true;
     }
 
+    private KeybindSetting listeningKeybind() {
+        if (!isConfiguring()) {
+            return null;
+        }
+        for (Setting<?> setting : configuredModule().settings()) {
+            if (setting instanceof KeybindSetting bind && bind.listening()) {
+                return bind;
+            }
+        }
+        return null;
+    }
+
     @Override
     public boolean charTyped(CharacterEvent event) {
         if (!searchFocused) {
@@ -236,6 +278,7 @@ public final class ClickGuiScreen extends Screen {
 
     @Override
     public void onClose() {
+        ClickGuiRenderer.resetConfigInteraction(configuredModule());
         super.onClose();
         if (minecraft != null) {
             minecraft.gui.setScreen(null);
